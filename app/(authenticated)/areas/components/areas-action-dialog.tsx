@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
@@ -68,6 +68,90 @@ export function AreasActionDialog({ open }: AreasActionDialogProps) {
     },
   })
 
+  // helper to pad codigo segments to two digits (shared)
+  const padCodigo = (raw: string | undefined | null) => {
+    if (!raw) return ''
+    return raw
+      .split('.')
+      .map((seg) => seg.trim())
+      .filter(Boolean)
+      .map((seg) => {
+        const n = parseInt(seg, 10)
+        return isNaN(n) ? seg.padStart(2, '0') : String(n).padStart(2, '0')
+      })
+      .join('.')
+  }
+
+  // compare codes by numeric segments (tolerant to leading zeros and spacing)
+  const compareCodesNormalized = (a?: string | null, b?: string | null) => {
+    if (!a || !b) return false
+    const segA = a.split('.').map(s => s.trim()).filter(Boolean).map(s => parseInt(s,10))
+    const segB = b.split('.').map(s => s.trim()).filter(Boolean).map(s => parseInt(s,10))
+    if (segA.length !== segB.length) return false
+    for (let i = 0; i < segA.length; i++) {
+      if (isNaN(segA[i]) || isNaN(segB[i]) || segA[i] !== segB[i]) return false
+    }
+    return true
+  }
+
+  // Watches to auto-generate child code when user types parent code or changes nivel
+  const codigoValue = form.watch('codigo')
+  const nivelValue = form.watch('nivel')
+  const lastAutoGen = useRef<string | null>(null)
+
+  useEffect(() => {
+    // Do not auto-generate when editing an existing area
+    if (isEditing) return
+
+    const rawCodigo = (codigoValue || '').trim()
+    if (!rawCodigo) return
+    const segments = rawCodigo.split('.').filter(Boolean)
+    if (!nivelValue || nivelValue <= 1) return
+
+    // If user provided the parent code (segments length == nivel - 1), auto-generate child
+    if (segments.length === nivelValue - 1) {
+      const parentCodigo = rawCodigo
+      // avoid repeated auto-generation
+      if (lastAutoGen.current === parentCodigo) return
+      let mounted = true
+      ;(async () => {
+        try {
+          const resp = await api.get('/areas/activas/', { withCredentials: true })
+          if (!mounted) return
+          const active = resp.data?.data || []
+          const parent = active.find((a: any) => padCodigo(a.codigo) === padCodigo(parentCodigo))
+          if (!parent) return
+          const subResp = await api.get(`/areas/${parent.id_area}/subareas/`, { withCredentials: true })
+          if (!mounted) return
+          const subareas = subResp.data?.data || []
+          let maxSuffix = 0
+          subareas.forEach((s: any) => {
+            const childCodigo = s.codigo || ''
+            if (childCodigo.startsWith(parentCodigo + '.')) {
+              const suffix = childCodigo.slice(parentCodigo.length + 1)
+              const last = suffix.split('.').pop()
+              const n = parseInt(last || '0', 10)
+              if (!isNaN(n) && n > maxSuffix) maxSuffix = n
+            }
+          })
+          const paddedParent = padCodigo(parentCodigo)
+          const newCodigo = `${paddedParent}.${String(maxSuffix + 1).padStart(2, '0')}`
+          lastAutoGen.current = parentCodigo
+          form.setValue('codigo', newCodigo)
+        } catch (e) {
+          // ignore errors silently for auto-gen
+          console.error('auto-gen child code error', e)
+        }
+      })()
+      return () => { mounted = false }
+    }
+
+    // If user types a full child code (segments >= nivel), clear lastAutoGen to allow future gens
+    if (segments.length >= nivelValue) {
+      lastAutoGen.current = null
+    }
+  }, [codigoValue, nivelValue, isEditing, form])
+
   useEffect(() => {
     if (isEditing) {
       form.reset({
@@ -126,25 +210,90 @@ export function AreasActionDialog({ open }: AreasActionDialogProps) {
       let areaPadreId: number | null = null
       if (data.nivel && data.nivel > 1) {
         const segments = codigoToSend.split('.').filter(Boolean)
-        if (segments.length < 2) {
-          form.setError('codigo' as any, { type: 'manual', message: 'Para crear un nivel > 1 debes indicar el código completo incluyendo el padre (ej: 06.02.05.01)' })
-          setIsSubmitting(false)
-          return
-        }
-        const parentCodigo = segments.slice(0, -1).join('.')
-        try {
+
+        // helper to fetch active areas list once
+        const fetchActive = async () => {
           const resp = await api.get('/areas/activas/', { withCredentials: true })
-          const active = resp.data?.data || []
-          const parent = active.find((a: any) => a.codigo === parentCodigo)
-          if (!parent) {
-            form.setError('codigo' as any, { type: 'manual', message: `No se encontró área padre con código ${parentCodigo}` })
+          return resp.data?.data || []
+        }
+
+        // If user entered only the parent code (segments.length === nivel - 1),
+        // auto-generate the child suffix and set codigoToSend accordingly.
+        if (segments.length === data.nivel - 1) {
+          const parentCodigo = codigoToSend
+          try {
+            const active = await fetchActive()
+            const parent = active.find((a: any) => padCodigo(a.codigo) === padCodigo(parentCodigo))
+            if (!parent) {
+              form.setError('codigo' as any, { type: 'manual', message: `No se encontró área padre con código ${parentCodigo}` })
+              setIsSubmitting(false)
+              return
+            }
+            // fetch subareas to compute next index
+            const subResp = await api.get(`/areas/${parent.id_area}/subareas/`, { withCredentials: true })
+            const subareas = subResp.data?.data || []
+            let maxSuffix = 0
+            subareas.forEach((s: any) => {
+              const childCodigo = s.codigo || ''
+              if (childCodigo.startsWith(parentCodigo + '.')) {
+                const suffix = childCodigo.slice(parentCodigo.length + 1)
+                const last = suffix.split('.').pop()
+                const n = parseInt(last || '0', 10)
+                if (!isNaN(n) && n > maxSuffix) maxSuffix = n
+              }
+            })
+            // pad parent and suffix
+            const pad = (s: string) => s.split('.').map(seg => String(parseInt(seg,10)).padStart(2,'0')).join('.')
+            const parentP = pad(parentCodigo)
+            codigoToSend = `${parentP}.${String(maxSuffix + 1).padStart(2,'0')}`
+            areaPadreId = parent.id_area
+          } catch (e) {
+            console.error('Error buscando/creando código hijo:', e)
+            form.setError('codigo' as any, { type: 'manual', message: 'Error calculando código hijo. Intenta nuevamente.' })
             setIsSubmitting(false)
             return
           }
-          areaPadreId = parent.id_area
-        } catch (e) {
-          console.error('Error buscando áreas activas para derivar padre:', e)
-          form.setError('codigo' as any, { type: 'manual', message: 'Error buscando el área padre. Intenta nuevamente.' })
+
+        } else if (segments.length >= data.nivel) {
+          // user provided full child code (or more), parent is all but last segment
+          const parentCodigo = segments.slice(0, -1).join('.')
+          try {
+            const active = await fetchActive()
+            let parent = active.find((a: any) => padCodigo(a.codigo) === padCodigo(parentCodigo) || compareCodesNormalized(a.codigo, parentCodigo))
+            if (!parent) {
+              // fallback: try all areas (including inactive)
+              try {
+                const allResp = await api.get('/areas/', { withCredentials: true })
+                const allAreas = allResp.data?.data || []
+                parent = allAreas.find((a: any) => padCodigo(a.codigo) === padCodigo(parentCodigo) || compareCodesNormalized(a.codigo, parentCodigo))
+                if (parent) {
+                  // parent exists but not active
+                  areaPadreId = parent.id_area
+                  // warn user but allow proceeding
+                  toast(`Área padre encontrada pero no está activa: ${padCodigo(parentCodigo)} (se asociará)`)
+                }
+              } catch (e) {
+                // ignore fallback error
+                console.error('fallback search error', e)
+              }
+            }
+
+            if (!parent) {
+              form.setError('codigo' as any, { type: 'manual', message: `No se encontró área padre con código ${parentCodigo}` })
+              setIsSubmitting(false)
+              return
+            }
+            areaPadreId = parent.id_area
+          } catch (e) {
+            console.error('Error buscando áreas activas para derivar padre:', e)
+            form.setError('codigo' as any, { type: 'manual', message: 'Error buscando el área padre. Intenta nuevamente.' })
+            setIsSubmitting(false)
+            return
+          }
+
+        } else {
+          // too few segments provided
+          form.setError('codigo' as any, { type: 'manual', message: `Código insuficiente para nivel ${data.nivel}. Indica el código del padre o el código completo del hijo.` })
           setIsSubmitting(false)
           return
         }
