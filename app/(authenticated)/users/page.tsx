@@ -7,6 +7,22 @@ import api from '@/lib/axios'
 import { UsersTable } from './components/users-table'
 import { type Empleado } from './data/schema'
 
+// Tipos locales para evitar `any`
+type SearchState = Record<string, unknown>
+
+type RawUserItem = {
+  empleado?: Empleado | null
+  id?: number
+  username?: string
+  email?: string
+  nombre?: string
+  apellido?: string
+  user?: { is_active?: boolean; groups?: string[] } | null
+  [key: string]: unknown
+}
+
+type NavigateSearch = true | SearchState | ((prev: SearchState) => SearchState | Partial<SearchState>)
+
 export default function UsersPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -16,7 +32,7 @@ export default function UsersPage() {
   const [error, setError] = useState<string | null>(null)
   
   // Convertir searchParams a objeto con tipos correctos
-  const search = useMemo(() => {
+  const search = useMemo<SearchState>(() => {
     const params: Record<string, unknown> = {}
     
     // Obtener todas las claves únicas
@@ -74,22 +90,22 @@ export default function UsersPage() {
 
       const response = await api.get(`/usuarios/list/?${queryParams.toString()}`)
 
-      const mapped = (response.data.results || []).map((item: any) => {
+      const mapped = (response.data.results || []).map((item: RawUserItem) => {
         if (item.empleado) {
           return {
             ...item.empleado,
             usuario: {
-              id: item.id,
-              username: item.username,
-              email: item.email,
-              first_name: item.nombre,
-              last_name: item.apellido,
-              is_active: item.user?.is_active ?? true,
-              grupos: item.user?.groups ?? [],
+              id: (item.id as number) || 0,
+              username: String(item.username ?? ''),
+              email: String(item.email ?? ''),
+              first_name: String(item.nombre ?? ''),
+              last_name: String(item.apellido ?? ''),
+              is_active: Boolean(item.user?.is_active ?? true),
+              grupos: (item.user?.groups as string[]) ?? [],
             },
-          }
+          } as Empleado
         }
-        return item
+        return item as unknown as Empleado
       })
       setEmpleados(mapped)
       setTotalCount(response.data.count || 0)
@@ -105,10 +121,15 @@ export default function UsersPage() {
     fetchEmpleados()
   }, [fetchEmpleados])
 
-  const navigate = useCallback((opts: { search: any }) => {
-    let params = opts.search;
+  const navigate = useCallback((opts: { search: NavigateSearch; replace?: boolean }) => {
+    let params = opts.search as NavigateSearch
+
+    if (params === true) {
+      params = {} as SearchState
+    }
+
     if (typeof params === 'function') {
-      params = params(search); // Ejecuta la función con el estado actual
+      params = (params as (prev: SearchState) => SearchState | Partial<SearchState>)(search) as SearchState // Ejecuta la función con el estado actual
     }
     const newParams = new URLSearchParams();
     Object.entries(params).forEach(([key, value]) => {
@@ -123,7 +144,7 @@ export default function UsersPage() {
     router.push(`?${newParams.toString()}`);
   }, [router, search]);
 
-  if (status === 'loading' || loading) {
+  if (loading) {
     return (
       <Main title='Usuarios' fixed>
         <div className='flex h-full items-center justify-center'>

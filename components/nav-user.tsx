@@ -110,16 +110,27 @@ export function NavUser({
                   setIsLoggingOut(true)
                   try {
                     const API_URL = process.env.NEXT_PUBLIC_API_URL
-                    // Usar GET para evitar CSRF y permitir que el servidor envie Set-Cookie
-                    const res = await fetch(`${API_URL}/usuarios/logout/`, {
-                      method: 'GET',
-                      credentials: 'include',
-                    })
 
-                    // Intentar eliminar csrftoken en el cliente si existe (no httponly)
-                    try {
-                      document.cookie = 'csrftoken=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT;'
-                    } catch (_) {}
+                    // Obtener csrftoken desde cookie para el encabezado (nombre configurable)
+                    const getCookie = (name: string) => {
+                      if (typeof document === 'undefined') return ''
+                      const v = `; ${document.cookie}`
+                      const parts = v.split(`; ${name}=`)
+                      if (parts.length === 2) return parts.pop()!.split(';').shift() || ''
+                      return ''
+                    }
+
+                    const CSRF_COOKIE_NAME = process.env.NEXT_PUBLIC_CSRF_COOKIE_NAME || 'fichas_csrftoken'
+                    const csrf = getCookie(CSRF_COOKIE_NAME)
+
+                    const res = await fetch(`${API_URL}/usuarios/logout/`, {
+                      method: 'POST',
+                      credentials: 'include',
+                      headers: {
+                        'Content-Type': 'application/json',
+                        ...(csrf ? { 'X-CSRFToken': csrf } : {}),
+                      }
+                    })
 
                     if (!res.ok) {
                       const text = await res.text().catch(() => null)

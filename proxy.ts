@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-// Rutas de autenticación (públicas)
+// Rutas de autenticación, activación y recuperación de contraseña (públicas)
 const authRoutes = [
   '/auth/sign-in',
   '/auth/sign-up',
   '/auth/forgot-password',
   '/auth/otp',
+  '/auth/activate-account',
 ]
 
 // Rutas protegidas que requieren autenticación
@@ -33,8 +34,9 @@ const protectedRoutes = [
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl
 
-  // Obtener token de las cookies HTTP-only
-  const token = req.cookies.get('accessToken')?.value
+  // Obtener token de las cookies HTTP-only (nombre configurable)
+  const accessCookieName = process.env.NEXT_PUBLIC_ACCESS_TOKEN_COOKIE_NAME || 'fichas_accessToken'
+  const token = req.cookies.get(accessCookieName)?.value
 
   // Función para validar token en backend
   async function validarToken(): Promise<boolean> {
@@ -49,7 +51,7 @@ export async function proxy(req: NextRequest) {
         },
       })
       return res.ok
-    } catch (err) {
+    } catch (_err) {
       return false
     }
   }

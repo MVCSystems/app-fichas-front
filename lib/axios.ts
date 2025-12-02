@@ -17,12 +17,15 @@ function getCookie(name: string): string | null {
   return match ? decodeURIComponent(match[2]) : null;
 }
 
+// Nombre de cookie CSRF (configurable desde frontend env)
+const CSRF_COOKIE_NAME = process.env.NEXT_PUBLIC_CSRF_COOKIE_NAME || 'fichas_csrftoken'
+
 // Añadir header CSRF automáticamente en métodos que lo requieran
 api.interceptors.request.use((config) => {
   try {
     const method = (config.method || '').toLowerCase();
     if (['post', 'put', 'patch', 'delete'].includes(method)) {
-      const csrf = getCookie('csrftoken');
+      const csrf = getCookie(CSRF_COOKIE_NAME);
       if (csrf) {
         (config.headers as Record<string, string>)['X-CSRFToken'] = csrf;
       }

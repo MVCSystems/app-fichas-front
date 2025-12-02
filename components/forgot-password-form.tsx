@@ -1,36 +1,60 @@
 "use client"
 
-import { Mail, ArrowLeft } from "lucide-react"
-import { Button } from "@/components/ui/button"
+import React, { useState } from 'react'
+import { Mail } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { Button } from '@/components/ui/button'
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card"
+} from '@/components/ui/card'
 import {
   Field,
   FieldDescription,
   FieldGroup,
   FieldLabel,
-} from "@/components/ui/field"
-import { Input } from "@/components/ui/input"
+} from '@/components/ui/field'
+import { Input } from '@/components/ui/input'
+import { toast } from 'sonner'
 
 export function ForgotPasswordForm() {
+  const [isLoading, setIsLoading] = useState(false)
+  const router = useRouter()
+
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
+    setIsLoading(true)
     const formData = new FormData(e.currentTarget)
-    const email = formData.get("email")
-    
+    const email = String(formData.get('email') || '')
+
     try {
-      // Aquí iría la llamada al backend para enviar el email de recuperación
-      console.log("Enviando email de recuperación a:", email)
-      // Mostrar mensaje de éxito
-      alert("Se ha enviado un enlace de recuperación a tu email")
+      const API_URL = process.env.NEXT_PUBLIC_API_URL
+      const res = await fetch(`${API_URL}/usuarios/recuperar-password/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email })
+      })
+
+      const json = await res.json().catch(() => null)
+      if (!res.ok) {
+        const msg = json?.message || json?.detail || 'Error al solicitar recuperación'
+        toast.error(msg)
+        setIsLoading(false)
+        return
+      }
+
+      toast.success('Se ha enviado un enlace de recuperación a tu email (si existe).')
+      // Redirigir al login después de enviar el enlace
+      const isEdge = typeof navigator !== 'undefined' && (/Edg\//.test(navigator.userAgent) || /Edge\//.test(navigator.userAgent))
+      setTimeout(() => router.push('/auth/sign-in'), isEdge ? 2000 : 700)
     } catch (error) {
-      console.error("Error al enviar email:", error)
-      alert("Error al enviar el email. Intenta de nuevo.")
+      console.error('Error al enviar email:', error)
+      toast.error('Error al enviar el email. Intenta de nuevo.')
+    } finally {
+      setIsLoading(false)
     }
   }
 
@@ -59,9 +83,9 @@ export function ForgotPasswordForm() {
               />
             </Field>
             <Field>
-              <Button type="submit" className="w-full">
+              <Button type="submit" className="w-full" disabled={isLoading}>
                 <Mail className="w-4 h-4 mr-2" />
-                Enviar enlace de recuperación
+                {isLoading ? 'Enviando...' : 'Enviar enlace de recuperación'}
               </Button>
             </Field>
           </FieldGroup>

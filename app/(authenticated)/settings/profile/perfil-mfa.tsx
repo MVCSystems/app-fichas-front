@@ -1,6 +1,7 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -9,7 +10,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Loader2, Lock, CheckCircle2, AlertCircle, QrCode, ShieldCheck, Copy } from 'lucide-react'
+import { Loader2, Lock, CheckCircle2, AlertCircle, QrCode, ShieldCheck, Download } from 'lucide-react'
 import api from '@/lib/axios'
 import { type PerfilUsuario, activarMFASchema, type ActivarMFA } from './schema'
 import {
@@ -43,6 +44,26 @@ export function PerfilMFA({ perfil, onUpdate }: PerfilMFAProps) {
   const [qrCode, setQrCode] = useState<string | null>(null)
   const [codigosRespaldo, setCodigosRespaldo] = useState<string[]>([])
   const [showCodigosDialog, setShowCodigosDialog] = useState(false)
+  const router = useRouter()
+
+  // Auto-iniciar descarga cuando los códigos se generen y el diálogo esté abierto
+  useEffect(() => {
+    if (!showCodigosDialog) return
+    if (!codigosRespaldo || codigosRespaldo.length === 0) return
+
+    const isEdge = typeof navigator !== 'undefined' && (/Edg\//.test(navigator.userAgent) || /Edge\//.test(navigator.userAgent))
+    const autoDelay = isEdge ? 900 : 300
+
+    const t = setTimeout(() => {
+      try {
+        descargarYRedirigir()
+      } catch (e) {
+        console.error('Auto-download failed:', e)
+      }
+    }, autoDelay)
+
+    return () => clearTimeout(t)
+  }, [codigosRespaldo, showCodigosDialog])
 
   const form = useForm<ActivarMFA>({
     resolver: zodResolver(activarMFASchema),
@@ -143,9 +164,34 @@ export function PerfilMFA({ perfil, onUpdate }: PerfilMFAProps) {
     }
   }
 
-  const copiarCodigos = () => {
-    navigator.clipboard.writeText(codigosRespaldo.join('\n'))
-    alert('Códigos copiados al portapapeles')
+  const descargarYRedirigir = () => {
+    try {
+      const content = codigosRespaldo.join('\n')
+      const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = 'codigos_respaldo.txt'
+      document.body.appendChild(a)
+      a.click()
+
+      // En algunos navegadores (Edge) la descarga puede necesitar tiempo
+      // No removemos ni revocamos inmediatamente para evitar cancelación
+      const isEdge = typeof navigator !== 'undefined' && (/Edg\//.test(navigator.userAgent) || /Edge\//.test(navigator.userAgent))
+      const revokeDelay = isEdge ? 2000 : 600
+
+      setTimeout(() => {
+        try { a.remove() } catch (e) { /* ignore */ }
+        try { URL.revokeObjectURL(url) } catch (e) { /* ignore */ }
+      }, revokeDelay)
+
+      // Cerrar dialog y redirigir al login después del mismo delay
+      setShowCodigosDialog(false)
+      setTimeout(() => router.push('/auth/sign-in'), revokeDelay + 100)
+    } catch (err) {
+      console.error('Error al descargar códigos:', err)
+      alert('No se pudo descargar los códigos. Intenta copiar manualmente.')
+    }
   }
 
   return (
@@ -378,16 +424,15 @@ export function PerfilMFA({ perfil, onUpdate }: PerfilMFAProps) {
               </div>
             </div>
 
-            <Button onClick={copiarCodigos} variant='outline' className='w-full'>
-              <Copy className='mr-2 h-4 w-4' />
-              Copiar Códigos
-            </Button>
+            <div className='text-sm text-muted-foreground'>
+              La descarga de los códigos se iniciará automáticamente. Una vez descargados, serás redirigido al login.
+            </div>
           </div>
 
           <DialogFooter>
-            <Button onClick={() => setShowCodigosDialog(false)}>
-              He guardado los códigos
-            </Button>
+            <div className='w-full text-center text-sm text-muted-foreground'>
+              Si la descarga no inicia automáticamente, espera unos segundos o revisa las descargas del navegador.
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>

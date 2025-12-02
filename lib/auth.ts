@@ -77,7 +77,7 @@ export const authService = {
   verifyMFA: async (userId: number, codigo: string) => {
     const response = await apiClient.post("/usuarios/verificar-mfa/", {
       user_id: userId,
-      codigo,
+      codigo_mfa: codigo,
     })
     return response.data
   },
