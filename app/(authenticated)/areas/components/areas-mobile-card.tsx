@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { ChevronDown, ChevronRight, MoreVertical } from 'lucide-react'
+import { ChevronDown, ChevronRight, CornerDownRightIcon, MoreVertical } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -61,18 +61,33 @@ export function AreasMobileCard({ area, isSelected, onSelectChange }: AreasMobil
             <div className='flex-1 min-w-0'>
               <div className='flex items-center gap-2 mb-1'>
                 {area.nivel > 1 && (
-                  <span className='text-muted-foreground text-sm'>└─</span>
+                  <div className='flex items-center gap-2'>
+                    <div className='h-4 w-[2px] rounded bg-muted/60' />
+                    <CornerDownRightIcon className='h-4 w-4 text-muted-foreground' />
+                  </div>
                 )}
                 <h3 className='font-semibold text-sm truncate'>
                   {area.nombre_area}
                 </h3>
+                <Badge variant='outline' className='text-[10px] px-1 py-0.5'>Nivel {area.nivel}</Badge>
               </div>
               
               <div className='flex items-center gap-2 flex-wrap'>
                 {area.codigo && (
-                  <span className='text-xs text-muted-foreground font-mono'>
-                    {area.codigo}
-                  </span>
+                  <div className='flex items-center gap-1'>
+                    {area.codigo.split(/\.|\-/).filter(Boolean).map((p, idx, arr) => (
+                      <span
+                        key={`${p}-${idx}`}
+                        className={cn(
+                          'rounded-sm px-1.5 py-0.5 text-xs font-mono',
+                          idx === arr.length - 1 ? 'bg-muted text-foreground' : 'bg-muted/60 text-muted-foreground'
+                        )}
+                        title={area.codigo}
+                      >
+                        {p}
+                      </span>
+                    ))}
+                  </div>
                 )}
                 {area.siglas && (
                   <Badge variant='outline' className='text-xs'>
